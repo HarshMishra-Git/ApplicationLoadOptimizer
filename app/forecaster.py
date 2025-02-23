@@ -1,3 +1,4 @@
+
 from prophet import Prophet
 import pandas as pd
 import numpy as np
@@ -5,6 +6,11 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 class Forecaster:
     def __init__(self):
+        self._initialize_model()
+        self.forecast = None
+        
+    def _initialize_model(self):
+        """Initialize a new Prophet model"""
         try:
             self.model = Prophet(
                 yearly_seasonality=True,
@@ -15,7 +21,6 @@ class Forecaster:
         except Exception as e:
             print(f"Error initializing Prophet model: {e}")
             raise
-        self.forecast = None
 
     def train(self, data):
         """Train the Prophet model"""
@@ -24,7 +29,9 @@ class Forecaster:
                 raise ValueError("Input data must be a pandas DataFrame")
             if not all(col in data.columns for col in ['ds', 'y']):
                 raise ValueError("Data must contain 'ds' and 'y' columns")
-
+            
+            # Initialize new model before training
+            self._initialize_model()
             self.model.fit(data)
             return True
         except Exception as e:
@@ -65,4 +72,5 @@ class Forecaster:
             return self.model.plot_components(self.forecast)
         except Exception as e:
             print(f"Error getting components: {e}")
+            raise
             raise

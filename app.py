@@ -1,86 +1,113 @@
+
 import streamlit as st
 import pandas as pd
+import numpy as np
 from app.data_processor import DataProcessor
 from app.forecaster import Forecaster
 from app.load_balancer import LoadBalancer
-from app.metrics import MetricsCalculator
 from app.utils import Visualizer
 
 # Page config
 st.set_page_config(
-    page_title="Application Utilization Forecasting",
+    page_title="Application Load Analyzer",
     page_icon="📊",
     layout="wide"
 )
 
-# Initialize components
-@st.cache_resource
-def init_components():
-    data_processor = DataProcessor()
-    forecaster = Forecaster()
-    load_balancer = LoadBalancer()
-    return data_processor, forecaster, load_balancer
-
-data_processor, forecaster, load_balancer = init_components()
+# Initialize session state
+if 'data_processor' not in st.session_state:
+    st.session_state.data_processor = DataProcessor()
+if 'forecaster' not in st.session_state:
+    st.session_state.forecaster = Forecaster()
+if 'load_balancer' not in st.session_state:
+    st.session_state.load_balancer = LoadBalancer()
+if 'visualizer' not in st.session_state:
+    st.session_state.visualizer = Visualizer()
 
 # Sidebar
 st.sidebar.title("Configuration")
-days_of_data = st.sidebar.slider("Days of Historical Data", 30, 180, 90)
-forecast_hours = st.sidebar.slider("Forecast Hours", 24, 168, 48)
+page = st.sidebar.selectbox("Select Page", ["Forecasting", "Load Balancing"])
 
-# Generate and process data
-data = data_processor.generate_sample_data(days=days_of_data)
-processed_data = data_processor.preprocess_data()
-prophet_data = data_processor.prepare_prophet_data()
+# Data generation parameters
+with st.sidebar.expander("Data Configuration"):
+    days = st.number_input("Number of days", min_value=30, max_value=365, value=90)
+    if st.button("Generate New Data"):
+        st.session_state.data = st.session_state.data_processor.generate_sample_data(days=days)
+        st.session_state.prophet_data = st.session_state.data_processor.prepare_prophet_data()
 
-# Main content
-st.title("Application Utilization Forecasting & Load Balancing")
+# Initialize data if not exists
+if 'data' not in st.session_state:
+    st.session_state.data = st.session_state.data_processor.generate_sample_data()
+    st.session_state.prophet_data = st.session_state.data_processor.prepare_prophet_data()
 
-# Forecasting section
-st.header("Utilization Forecasting")
-with st.spinner("Training forecasting model..."):
-    forecaster.train(prophet_data)
-    forecast = forecaster.predict(periods=forecast_hours)
+if page == "Forecasting":
+    st.title("📈 Application Usage Forecasting")
     
-    # Plot forecast
-    forecast_plot = Visualizer.plot_forecast(forecast, prophet_data)
-    st.plotly_chart(forecast_plot, use_container_width=True)
+    # Display raw data
+    with st.expander("View Raw Data"):
+        st.dataframe(st.session_state.data)
     
-    # Metrics
-    metrics = forecaster.get_metrics(
-        prophet_data['y'][-forecast_hours:],
-        forecast['yhat'][-forecast_hours:]
-    )
+    # Forecasting parameters
+    col1, col2 = st.columns(2)
+    with col1:
+        forecast_periods = st.slider("Forecast Periods (hours)", 24, 168, 24)
+    with col2:
+        target_col = st.selectbox("Target Variable", ["active_users", "server_load", "response_time"])
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("MAE", f"{metrics['MAE']:.2f}")
-    col2.metric("MSE", f"{metrics['MSE']:.2f}")
-    col3.metric("RMSE", f"{metrics['RMSE']:.2f}")
+    # Train and forecast
+    if st.button("Generate Forecast"):
+        with st.spinner("Training model and generating forecast..."):
+            prophet_data = st.session_state.data_processor.prepare_prophet_data(target_col)
+            st.session_state.forecaster.train(prophet_data)
+            forecast = st.session_state.forecaster.predict(periods=forecast_periods)
+            
+            # Plot forecast
+            fig = st.session_state.visualizer.plot_forecast(forecast, prophet_data)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Show metrics
+            metrics = st.session_state.forecaster.get_metrics(
+                prophet_data['y'][-forecast_periods:],
+                forecast['yhat'][-forecast_periods:]
+            )
+            st.subheader("Forecast Metrics")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("MAE", f"{metrics['MAE']:.2f}")
+            col2.metric("MSE", f"{metrics['MSE']:.2f}")
+            col3.metric("RMSE", f"{metrics['RMSE']:.2f}")
 
-# Load Balancing section
-st.header("Load Balancing Simulation")
-if st.button("Simulate Load Balancing"):
-    for _ in range(100):  # Simulate 100 requests
-        load_balancer.round_robin(
-            request_load=processed_data['server_load'].mean()
-        )
+elif page == "Load Balancing":
+    st.title("⚖️ Load Balancing Simulation")
     
-    server_metrics = load_balancer.get_server_metrics()
+    # Load balancing parameters
+    col1, col2 = st.columns(2)
+    with col1:
+        num_servers = st.slider("Number of Servers", 2, 10, 3)
+        st.session_state.load_balancer = LoadBalancer(num_servers=num_servers)
+    with col2:
+        request_load = st.slider("Average Request Load", 10, 100, 50)
     
-    # Plot server loads
-    load_plot = Visualizer.plot_server_loads(server_metrics)
-    st.plotly_chart(load_plot, use_container_width=True)
-    
-    # Load distribution metrics
-    distribution_metrics = MetricsCalculator.calculate_load_distribution(server_metrics)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Min Load", f"{distribution_metrics['min_load']:.2f}")
-    col2.metric("Max Load", f"{distribution_metrics['max_load']:.2f}")
-    col3.metric("Std Load", f"{distribution_metrics['std_load']:.2f}")
-    col4.metric("Load Imbalance", f"{distribution_metrics['load_imbalance']:.2f}")
+    # Simulate load balancing
+    if st.button("Simulate Load Balancing"):
+        with st.spinner("Simulating load balancing..."):
+            # Simulate requests
+            for _ in range(100):
+                st.session_state.load_balancer.round_robin(request_load)
+            
+            # Get and display metrics
+            server_metrics = st.session_state.load_balancer.get_server_metrics()
+            
+            # Plot server loads
+            fig = st.session_state.visualizer.plot_server_loads(server_metrics)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Display detailed metrics
+            st.subheader("Server Metrics")
+            cols = st.columns(len(server_metrics))
+            for i, (server, metrics) in enumerate(server_metrics.items()):
+                cols[i].metric(
+                    f"Server {i}",
+                    f"Load: {metrics['avg_load']:.1f}",
+                    f"Response: {metrics['avg_response_time']:.1f}ms"
+                )
 
-# Show raw data
-if st.checkbox("Show Raw Data"):
-    st.subheader("Raw Application Usage Data")
-    st.dataframe(processed_data)
